@@ -1,4 +1,6 @@
 import re
+import xml.etree.ElementTree as ET
+import xml.etree
 from datetime import datetime, date
 
 import requests
@@ -41,6 +43,7 @@ class FioBank(object):
         'last': 'last/{token}/transactions.json',
         'set-last-id': 'set-last-id/{token}/{from_id}/',
         'set-last-date': 'set-last-date/{token}/{from_date}/',
+        'import': 'import/',
     }
 
     # http://www.fio.cz/xsd/IBSchema.xsd
@@ -79,6 +82,7 @@ class FioBank(object):
 
     def __init__(self, token):
         self.token = token
+        self.prepare_payment()
 
     def _request(self, action, **params):
         template = self.base_url + self.actions[action]
@@ -183,3 +187,69 @@ class FioBank(object):
             self._request('set-last-date', from_date=coerce_date(from_date))
 
         return self._parse_transactions(self._request('last'))
+
+    def add_payment(self, data, payment_type = 'DomesticTransaction'):
+        
+        if payment_type == 'DomesticTransaction':
+            required = {'accountFrom', 'currency', 'amount', 'accountTo', 'bankCode', 'date'}
+            optional = {'ks', 'vs', 'ss', 'messageForRecipient', 'comment', 'paymentReason', 'paymentType'}
+        elif paymentType == 'T2Transaction':
+            required = {'accountFrom', 'currency', 'amount', 'accountTo', 'bankCode', 'date'}
+            optional = {'ks', 'vs', 'ss', 'messageForRecipient', 'comment', 'paymentReason', 'paymentType'}
+        elif paymentType == 'ForeignTransaction':
+            required = {'accountFrom', 'currency', 'amount', 'accountTo', 'bic', 'date', 'benefName', 'benefStreet', 'benefCity', 'benefCountry', 'remittanceInfo1', 'detailsOfCharges', 'paymentReason'}
+            optional = {'comment', 'remittanceInfo2', 'remittanceInfo3'}
+        
+
+        payment = ET.Element(payment_type)
+        data['date'] = str(date.today())
+
+        for index in required:
+            v = ET.SubElement(payment, index)
+            v.text = str(data[index])
+
+        for index in optional:
+            if index in data:
+                v = ET.SubElement(payment, index)
+                v.text = str(data[index])
+
+        self.payment_orders.append(payment)
+        return payment
+
+
+    def prepare_payment(self):
+        self.payment_xml = ET.Element('Import')
+        self.payment_xml.set('xmlns:xsi', "http://www.w3.org/2001/XMLSchema-instance")
+        self.payment_xml.set('xsi:noNamespaceSchemaLocation', "http://www.fio.cz/schema/importIB.xsd")
+        self.payment_orders = ET.SubElement(self.payment_xml, 'Orders')
+
+
+    def do_payment(self):
+        print("Do payment")
+        print(ET.dump(self.payment_orders))
+
+        headers = {
+          'Content-Type': 'multipart/form-data',
+          #'Accept': 'application/json',
+          'type': 'xml',
+          'token': self.token
+        }
+
+        files = {"file": ET.tostring(self.payment_xml).decode()}
+        print(files)
+        r = requests.Request('POST', self.base_url+self.actions['import'], files=files, headers=headers).prepare()
+        print(r.body.decode('utf-8'))
+    
+        print(r)
+       # print(r.text)
+
+
+if __name__ == '__main__':
+    a = FioBank('0DJLIXEoSTDY3RT6069NHMbySoTZpb4NwmKzCosr4o2SohvfwRZXxjkGj1BZO3R5')
+    a.prepare_payment()
+    a.add_payment({'accountFrom':'2001731496', 'currency': 'CZK', 'amount': '23.3', 'accountTo': '234-344532', 'bankCode': '0343'})
+    a.add_payment({'accountFrom':'2001731496', 'currency': 'CZK', 'amount': '2.3', 'accountTo': '234-34532', 'bankCode': '0343'})
+    a.add_payment({'accountFrom':'2001731496', 'currency': 'CZK', 'amount': '54.3', 'accountTo': '23445-3432', 'bankCode': '0343'})
+    a.do_payment()
+
+
